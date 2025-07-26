@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"net/http"
-	"time"
 
+	"github.com/bytedance/sonic"
+	"github.com/codevsk/rinha-backend-go-2025/cmd/api/handler"
 	"github.com/codevsk/rinha-backend-go-2025/configs"
 	"github.com/codevsk/rinha-backend-go-2025/internal"
 	"github.com/go-redis/redis/v8"
@@ -18,52 +18,24 @@ func main() {
 		Addr: cfg.RedisURL,
 	})
 
-	pq := make(chan internal.PaymentRequest, 20000)
+	c := internal.NewRestClient(*cfg)
 
-	c := http.Client{
-		Timeout: time.Duration(cfg.HttpDefaultTimeout) * time.Second,
-	}
+	p := internal.NewPaymentService(c, cfg, db)
 
-	rc := internal.NewRestClient(*cfg)
+	p.StartWorkers()
 
-	p := internal.NewPayment(pq, c, rc, cfg, db)
+	h := handler.NewPaymentHandler(p)
 
-	for i := 0; i < cfg.WorkersCount; i++ {
-		go p.Worker()
-	}
-
-	newFiber(cfg, p)
-}
-
-func newFiber(cfg *configs.Config, payment *internal.Payment) {
 	f := fiber.New(fiber.Config{
 		ServerHeader: "Fiber",
 		AppName:      "CodeVSK",
+		JSONEncoder:  sonic.Marshal,
+		JSONDecoder:  sonic.Unmarshal,
 	})
 
-	f.Get("/payments-summary", func(c *fiber.Ctx) error {
-		fromStr := c.Query("from")
-		toStr := c.Query("to")
+	f.Get("/payments-summary", h.GetPaymentsSummary)
 
-		summary, err := payment.GetPaymentsSummary(c.Context(), fromStr, toStr)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-		}
-
-		return c.JSON(summary)
-	})
-
-	f.Post("/payments", func(c *fiber.Ctx) error {
-		var input internal.PaymentRequest
-
-		if err := c.BodyParser(&input); err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
-		}
-
-		payment.EnqueuePayment(input)
-
-		return c.Status(fiber.StatusAccepted).JSON(fiber.Map{"message": "Payment registered successfully"})
-	})
+	f.Post("/payments", h.RequestPayment)
 
 	if err := f.Listen(fmt.Sprintf(":%s", cfg.HttpServerPort)); err != nil {
 		panic(err)

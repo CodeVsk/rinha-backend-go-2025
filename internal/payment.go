@@ -2,48 +2,44 @@ package internal
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"net/http"
 	"time"
 
 	"github.com/araddon/dateparse"
+	"github.com/bytedance/sonic"
 	"github.com/codevsk/rinha-backend-go-2025/configs"
 	"github.com/go-redis/redis/v8"
 )
 
-var ErrFailureToProcessPayment = errors.New("failure to process payment")
-var ErrUnavailableProcessor = errors.New("unavailable processors")
-var ErrConflictProcess = errors.New("entity already exist")
-var ErrFallbackProcess = errors.New("fallback process error")
-
-type Payment struct {
+type PaymentService struct {
 	paymentQueue chan PaymentRequest
-	semaphore    chan struct{}
-	client       http.Client
 	restClient   *RestClient
 	cfg          *configs.Config
 	rdb          *redis.Client
 }
 
-func NewPayment(paymentQueue chan PaymentRequest, client http.Client, restClient *RestClient, cfg *configs.Config, rdb *redis.Client) *Payment {
-	return &Payment{
-		paymentQueue: paymentQueue,
-		semaphore:    make(chan struct{}, cfg.WorkersCount),
-		client:       client,
+func NewPaymentService(restClient *RestClient, cfg *configs.Config, rdb *redis.Client) *PaymentService {
+	return &PaymentService{
+		paymentQueue: make(chan PaymentRequest, cfg.PaymentQueueChanSize),
 		restClient:   restClient,
 		cfg:          cfg,
 		rdb:          rdb,
 	}
 }
 
-func (p *Payment) EnqueuePayment(payment PaymentRequest) {
+func (p *PaymentService) EnqueuePayment(payment PaymentRequest) {
 	p.paymentQueue <- payment
 }
 
-func (p *Payment) Worker() {
+func (p *PaymentService) StartWorkers() {
+	for i := 0; i < p.cfg.WorkersCount; i++ {
+		go p.worker()
+	}
+}
+
+func (p *PaymentService) worker() {
 	for payment := range p.paymentQueue {
 		if err := p.ProcessPayment(context.Background(), payment); err != nil {
 			p.paymentQueue <- payment
@@ -51,8 +47,8 @@ func (p *Payment) Worker() {
 	}
 }
 
-func (p *Payment) ProcessPayment(ctx context.Context, payment PaymentRequest) error {
-	paymentBytes, err := p.httpPostWithRetry(payment)
+func (p *PaymentService) ProcessPayment(ctx context.Context, payment PaymentRequest) error {
+	paymentBytes, err := p.sendPayment(payment)
 	if err != nil {
 		if errors.Is(err, ErrConflictProcess) {
 			return nil
@@ -62,14 +58,13 @@ func (p *Payment) ProcessPayment(ctx context.Context, payment PaymentRequest) er
 
 	err = p.rdb.HSet(ctx, p.cfg.PaymentTableHash, payment.CorrelationID, paymentBytes).Err()
 	if err != nil {
-		fmt.Println(err)
 		return fmt.Errorf("failed to save payment in redis: %w", err)
 	}
 
 	return nil
 }
 
-func (p *Payment) httpPostWithRetry(payment PaymentRequest) ([]byte, error) {
+func (p *PaymentService) sendPayment(payment PaymentRequest) ([]byte, error) {
 	var bodyBytes []byte
 	var err error
 
@@ -97,73 +92,7 @@ func (p *Payment) httpPostWithRetry(payment PaymentRequest) ([]byte, error) {
 	return nil, ErrFailureToProcessPayment
 }
 
-/*
-func (p *Payment) httpPostWithRetry(payment PaymentRequest) ([]byte, error) {
-	var paymentRequest PaymentProcessorRequest
-
-	endpoint := p.cfg.DefaultProcessorUrl
-	paymentRequest.ProcessedBy = "default"
-	paymentRequest.CorrelationID = payment.CorrelationID
-	paymentRequest.Amount = payment.Amount
-
-	for attempt := 1; attempt <= p.cfg.RetryDefault; attempt++ {
-		paymentRequest.RequestedAt = time.Now().UTC().Format(time.RFC3339Nano)
-
-		bodyBytes, err := json.Marshal(paymentRequest)
-		if err != nil {
-			return nil, err
-		}
-
-		res, err := p.client.Post(endpoint+"/payments", "application/json", bytes.NewBuffer(bodyBytes))
-		if err != nil {
-			return nil, err
-		}
-		defer res.Body.Close()
-
-		if res.StatusCode == 409 || res.StatusCode == 422 {
-			fmt.Print(ErrConflictProcess.Error())
-			return nil, ErrConflictProcess
-		}
-
-		//if res.StatusCode == 500 {
-		//	time.Sleep(7 * time.Second)
-		//	continue
-		//}
-
-		if res.StatusCode >= 200 && res.StatusCode <= 300 {
-			return bodyBytes, nil
-		}
-	}
-
-	paymentRequest.ProcessedBy = "fallback"
-	paymentRequest.RequestedAt = time.Now().UTC().Format(time.RFC3339Nano)
-
-	bodyBytes, err := json.Marshal(paymentRequest)
-	if err != nil {
-		return nil, err
-	}
-
-	client2 := http.Client{
-		Timeout: time.Duration(p.cfg.HttpFallbackTimeout) * time.Second,
-	}
-	res, err := client2.Post(p.cfg.FallbackProcessorUrl+"/payments", "application/json", bytes.NewBuffer(bodyBytes))
-	if err != nil {
-		return nil, err
-	}
-
-	if res.StatusCode == 409 || res.StatusCode == 422 {
-		return nil, ErrConflictProcess
-	}
-
-	if res.StatusCode >= 200 && res.StatusCode <= 300 {
-		return bodyBytes, nil
-	}
-	defer res.Body.Close()
-
-	return nil, ErrFailureToProcessPayment
-}*/
-
-func (p *Payment) GetPaymentsSummary(ctx context.Context, fromStr string, toStr string) (PaymentSummaryResponse, error) {
+func (p *PaymentService) GetPaymentsSummary(ctx context.Context, fromStr string, toStr string) (PaymentSummaryResponse, error) {
 	paymentList, err := p.rdb.HGetAll(ctx, p.cfg.PaymentTableHash).Result()
 	if err != nil {
 		return PaymentSummaryResponse{}, err
@@ -187,7 +116,7 @@ func (p *Payment) GetPaymentsSummary(ctx context.Context, fromStr string, toStr 
 
 	for _, payment := range paymentList {
 		var item PaymentProcessorRequest
-		if err := json.Unmarshal([]byte(payment), &item); err != nil {
+		if err := sonic.Unmarshal([]byte(payment), &item); err != nil {
 			continue
 		}
 
@@ -209,13 +138,13 @@ func (p *Payment) GetPaymentsSummary(ctx context.Context, fromStr string, toStr 
 		}
 	}
 
-	output.Default.TotalAmount = math.Round(float64(output.Default.TotalAmount)*10) / 10
-	output.Fallback.TotalAmount = math.Round(float64(output.Fallback.TotalAmount)*10) / 10
+	output.Default.TotalAmount = math.Round(output.Default.TotalAmount*10) / 10
+	output.Fallback.TotalAmount = math.Round(output.Fallback.TotalAmount*10) / 10
 
 	return output, nil
 }
 
-func (p *Payment) parseTimeRange(fromStr, toStr string) (time.Time, time.Time, bool, error) {
+func (p *PaymentService) parseTimeRange(fromStr, toStr string) (time.Time, time.Time, bool, error) {
 	if fromStr == "" && toStr == "" {
 		return time.Time{}, time.Time{}, false, nil
 	}

@@ -2,10 +2,11 @@ package internal
 
 import (
 	"bytes"
-	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/codevsk/rinha-backend-go-2025/configs"
 	"github.com/sony/gobreaker/v2"
 )
@@ -49,7 +50,7 @@ func (r *RestClient) SendPaymentDefault(paymentRequest PaymentProcessorRequest) 
 		paymentRequest.ProcessedBy = "default"
 		paymentRequest.RequestedAt = time.Now().UTC().Format(time.RFC3339Nano)
 
-		bodyBytes, err := json.Marshal(paymentRequest)
+		bodyBytes, err := sonic.Marshal(paymentRequest)
 		if err != nil {
 			return nil, err
 		}
@@ -59,6 +60,11 @@ func (r *RestClient) SendPaymentDefault(paymentRequest PaymentProcessorRequest) 
 			return nil, err
 		}
 		defer res.Body.Close()
+
+		_, err = io.ReadAll(res.Body)
+		if err != nil {
+			return nil, err
+		}
 
 		if res.StatusCode == 409 || res.StatusCode == 422 {
 			return nil, nil
@@ -79,7 +85,7 @@ func (r *RestClient) SendPaymentFallback(paymentRequest PaymentProcessorRequest)
 		paymentRequest.ProcessedBy = "fallback"
 		paymentRequest.RequestedAt = time.Now().UTC().Format(time.RFC3339Nano)
 
-		bodyBytes, err := json.Marshal(paymentRequest)
+		bodyBytes, err := sonic.Marshal(paymentRequest)
 		if err != nil {
 			return nil, err
 		}
@@ -89,6 +95,11 @@ func (r *RestClient) SendPaymentFallback(paymentRequest PaymentProcessorRequest)
 			return nil, err
 		}
 		defer res.Body.Close()
+
+		_, err = io.ReadAll(res.Body)
+		if err != nil {
+			return nil, err
+		}
 
 		if res.StatusCode == 409 || res.StatusCode == 422 {
 			return nil, nil

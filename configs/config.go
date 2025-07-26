@@ -11,8 +11,11 @@ type Config struct {
 	DefaultProcessorUrl            string
 	FallbackProcessorUrl           string
 	RedisURL                       string
+	PaymentTableHash               string
+	PaymentQueueChanSize           int
 	WorkersCount                   int
 	RetryDefault                   int
+	RetryFallback                  int
 	HttpDefaultTimeout             int
 	HttpFallbackTimeout            int
 	ConsecutiveFailuresDefault     int
@@ -21,13 +24,15 @@ type Config struct {
 	CircuitBreakerIntervalFallback int
 	CircuitBreakerTimeoutDefault   int
 	CircuitBreakerTimeoutFallback  int
-
-	PaymentQueueName string
-	PaymentTableHash string
 }
 
 func NewConfig() *Config {
 	env.LoadConfig(".env")
+
+	paymentQueueChanSize, err := strconv.Atoi(env.GetEnv("PAYMENT_QUEUE_CHAN_SIZE", "20000"))
+	if err != nil {
+		panic(err)
+	}
 
 	workersCount, err := strconv.Atoi(env.GetEnv("WORKERS_COUNT", "5"))
 	if err != nil {
@@ -35,6 +40,11 @@ func NewConfig() *Config {
 	}
 
 	retryDefault, err := strconv.Atoi(env.GetEnv("RETRY_DEFAULT", "5"))
+	if err != nil {
+		panic(err)
+	}
+
+	retryFallback, err := strconv.Atoi(env.GetEnv("RETRY_FALLBACK", "5"))
 	if err != nil {
 		panic(err)
 	}
@@ -84,10 +94,11 @@ func NewConfig() *Config {
 		DefaultProcessorUrl:            env.GetEnv("DEFAULT_URL", "http://localhost:8001"),
 		FallbackProcessorUrl:           env.GetEnv("FALLBACK_URL", "http://localhost:8002"),
 		RedisURL:                       env.GetEnv("REDIS_URL", "localhost:6379"),
-		PaymentQueueName:               env.GetEnv("PAYMENT_QUEUE_NAME", "payments_pending"),
 		PaymentTableHash:               env.GetEnv("PAYMENT_TABLE_HASH", "payments"),
+		PaymentQueueChanSize:           paymentQueueChanSize,
 		WorkersCount:                   workersCount,
 		RetryDefault:                   retryDefault,
+		RetryFallback:                  retryFallback,
 		HttpDefaultTimeout:             httpDefaultTimeout,
 		HttpFallbackTimeout:            httpFallbackTimeout,
 		ConsecutiveFailuresDefault:     consecutiveFailuresDefault,

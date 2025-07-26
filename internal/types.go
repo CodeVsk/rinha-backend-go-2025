@@ -1,20 +1,25 @@
 package internal
 
+import "errors"
+
+var ErrFailureToProcessPayment = errors.New("failure to process payment")
+var ErrConflictProcess = errors.New("entity already exist")
+
 type PaymentRequest struct {
 	CorrelationID string  `json:"correlationId"`
 	Amount        float64 `json:"amount"`
 }
 
 type PaymentProcessorRequest struct {
-	CorrelationID string  `json:"correlationId"`
 	Amount        float64 `json:"amount"`
+	CorrelationID string  `json:"correlationId"`
 	ProcessedBy   string  `json:"processedBy"`
-	RequestedAt   string  `json:"requestedAt"` // ISO 8601 format
+	RequestedAt   string  `json:"requestedAt"`
 }
 
 type PaymentSummaryItem struct {
-	TotalRequests int     `json:"totalRequests"`
 	TotalAmount   float64 `json:"totalAmount"`
+	TotalRequests int     `json:"totalRequests"`
 }
 
 type PaymentSummaryResponse struct {
@@ -23,8 +28,8 @@ type PaymentSummaryResponse struct {
 }
 
 type HealthCheckResponse struct {
-	Failing         bool `json:"failing"`
 	MinResponseTime int  `json:"minResponseTime"`
+	Failing         bool `json:"failing"`
 }
 
 type HealthCheckStatus struct {
