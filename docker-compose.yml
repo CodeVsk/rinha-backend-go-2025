@@ -14,7 +14,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.3"
+          cpus: "0.2"
           memory: "60MB"
   api01: &api
     build: .
@@ -48,7 +48,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.75"
+          cpus: "0.5"
           memory: "120MB"
     depends_on:
       redis:
@@ -59,7 +59,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.75"
+          cpus: "0.5"
           memory: "120MB"
   redis:
     image: redis:7.2-alpine
@@ -77,7 +77,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.45"
+          cpus: "0.3"
           memory: "50MB"
 
 #--- NETWORKS ---
