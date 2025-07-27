@@ -25,8 +25,8 @@ services:
       - DEFAULT_URL=http://payment-processor-default:8080
       - FALLBACK_URL=http://payment-processor-fallback:8080
       - PAYMENT_QUEUE_CHAN_SIZE=20000
-      - WORKERS_COUNT=20
-      - RETRY_DEFAULT=2
+      - WORKERS_COUNT=27
+      - RETRY_DEFAULT=5
       - RETRY_FALLBACK=1
       - HTTP_DEFAULT_TIMEOUT=3
       - HTTP_FALLBACK_TIMEOUT=2
@@ -34,8 +34,14 @@ services:
       - CONSECUTIVE_FAILURES_FALLBACK=1
       - CIRCUIT_BREAKER_INTERVAL_DEFAULT=500
       - CIRCUIT_BREAKER_INTERVAL_FALLBACK=500
-      - CIRCUIT_BREAKER_TIMEOUT_DEFAULT=1
-      - CIRCUIT_BREAKER_TIMEOUT_FALLBACK=2
+      - CIRCUIT_BREAKER_TIMEOUT_DEFAULT=800
+      - CIRCUIT_BREAKER_TIMEOUT_FALLBACK=800
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/payment-summary"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - backend
       - payment-processor-net
@@ -43,7 +49,7 @@ services:
       resources:
         limits:
           cpus: "0.75"
-          memory: "130MB"
+          memory: "120MB"
     depends_on:
       redis:
         condition: service_healthy
@@ -54,7 +60,7 @@ services:
       resources:
         limits:
           cpus: "0.75"
-          memory: "130MB"
+          memory: "120MB"
   redis:
     image: redis:7.2-alpine
     container_name: redis
@@ -72,7 +78,7 @@ services:
       resources:
         limits:
           cpus: "0.45"
-          memory: "30MB"
+          memory: "50MB"
 
 #--- NETWORKS ---
 networks:

@@ -41,55 +41,45 @@ func (p *PaymentService) StartWorkers() {
 
 func (p *PaymentService) worker() {
 	for payment := range p.paymentQueue {
-		if err := p.ProcessPayment(context.Background(), payment); err != nil {
-			p.paymentQueue <- payment
+		if err := p.sendPayment(context.Background(), payment); err != nil {
+			if !errors.Is(err, ErrConflictProcess) {
+				p.paymentQueue <- payment
+			}
 		}
+
 	}
 }
 
-func (p *PaymentService) ProcessPayment(ctx context.Context, payment PaymentRequest) error {
-	paymentBytes, err := p.sendPayment(payment)
-	if err != nil {
-		if errors.Is(err, ErrConflictProcess) {
-			return nil
-		}
-		return err
-	}
-
-	err = p.rdb.HSet(ctx, p.cfg.PaymentTableHash, payment.CorrelationID, paymentBytes).Err()
-	if err != nil {
-		return fmt.Errorf("failed to save payment in redis: %w", err)
-	}
-
-	return nil
-}
-
-func (p *PaymentService) sendPayment(payment PaymentRequest) ([]byte, error) {
-	var bodyBytes []byte
-	var err error
-
+func (p *PaymentService) sendPayment(ctx context.Context, payment PaymentRequest) error {
 	paymentRequest := PaymentProcessorRequest{
 		CorrelationID: payment.CorrelationID,
 		Amount:        payment.Amount,
 	}
 
-	bodyBytes, err = p.restClient.SendPaymentDefault(paymentRequest)
-	if err == nil && bodyBytes == nil {
-		return nil, ErrConflictProcess
-	}
-	if bodyBytes != nil {
-		return bodyBytes, nil
+	processors := []func(PaymentProcessorRequest) ([]byte, error){
+		p.restClient.SendPaymentDefault,
+		p.restClient.SendPaymentFallback,
 	}
 
-	bodyBytes, err = p.restClient.SendPaymentFallback(paymentRequest)
-	if err == nil && bodyBytes == nil {
-		return nil, ErrConflictProcess
-	}
-	if bodyBytes != nil {
-		return bodyBytes, nil
+	for _, processor := range processors {
+		bodyBytes, err := processor(paymentRequest)
+		if err != nil {
+			continue
+		}
+
+		if bodyBytes == nil {
+			return ErrConflictProcess
+		}
+
+		if err := p.rdb.HSet(ctx, p.cfg.PaymentTableHash, payment.CorrelationID, bodyBytes).Err(); err != nil {
+			return fmt.Errorf("failed to save payment in redis: %w", err)
+		}
+
+		return nil
 	}
 
-	return nil, ErrFailureToProcessPayment
+	return ErrFailureToProcessPayment
+
 }
 
 func (p *PaymentService) GetPaymentsSummary(ctx context.Context, fromStr string, toStr string) (PaymentSummaryResponse, error) {

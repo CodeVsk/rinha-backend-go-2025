@@ -28,7 +28,7 @@ func NewRestClient(cfg configs.Config) *RestClient {
 			Name:        "DefaultProcessor",
 			MaxRequests: uint32(cfg.RetryDefault),
 			Interval:    time.Duration(cfg.CircuitBreakerIntervalDefault) * time.Millisecond,
-			Timeout:     time.Duration(cfg.CircuitBreakerTimeoutDefault) * time.Second, //time.Duration(cfg.HttpDefaultTimeout) * time.Second,
+			Timeout:     time.Duration(cfg.CircuitBreakerTimeoutDefault) * time.Millisecond,
 			ReadyToTrip: func(counts gobreaker.Counts) bool {
 				return counts.ConsecutiveFailures > uint32(cfg.ConsecutiveFailuresDefault)
 			},
@@ -37,7 +37,7 @@ func NewRestClient(cfg configs.Config) *RestClient {
 			Name:        "FallbackProcessor",
 			MaxRequests: 1,
 			Interval:    time.Duration(cfg.CircuitBreakerIntervalFallback) * time.Millisecond,
-			Timeout:     time.Duration(cfg.CircuitBreakerTimeoutFallback) * time.Second,
+			Timeout:     time.Duration(cfg.CircuitBreakerTimeoutFallback) * time.Millisecond,
 			ReadyToTrip: func(counts gobreaker.Counts) bool {
 				return counts.ConsecutiveFailures > uint32(cfg.ConsecutiveFailuresFallback)
 			},
